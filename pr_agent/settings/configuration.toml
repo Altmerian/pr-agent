@@ -360,4 +360,3 @@ pr_commands = [
 
 [jira]
 enable_jira_integration = true
-jira_base_url = "https://groupby.atlassian.net"
