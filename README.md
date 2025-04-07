@@ -49,6 +49,7 @@ PR-Agent aims to help efficiently review and handle pull requests, by providing 
 - [Qodo Merge](https://qodo-merge-docs.qodo.ai/overview/pr_agent_pro/)
 - [How it works](#how-it-works)
 - [Why use PR-Agent?](#why-use-pr-agent)
+- [Run PR-Agent locally](#run-pr-agent-locally)
 
 ## News and Updates
 
@@ -261,3 +262,13 @@ https://openai.com/enterprise-privacy
 - Blog: https://www.qodo.ai/blog/
 - Troubleshooting: https://www.qodo.ai/blog/technical-faq-and-troubleshooting/
 - Support: support@qodo.ai
+
+
+## run pr-agent locally
+
+```
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+python -m pr_agent.cli --pr_url=https://github.com/Codium-ai/pr-agent/pull/1234 review
+```
