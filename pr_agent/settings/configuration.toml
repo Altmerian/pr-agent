@@ -7,6 +7,7 @@
 [config]
 # models
 model="claude-3-7-sonnet-20250219"
+#model="google_ai_studio/gemini-2.5-pro-preview-03-25"
 fallback_models=["o3-mini", "gpt-4o-2024-11-20"]
 #model_weak="google_ai_studio/gemini-2.0-flash" # optional, a weaker model to use for some easier tasks
 # CLI
@@ -360,4 +361,3 @@ pr_commands = [
 
 [jira]
 enable_jira_integration = true
-jira_base_url = "https://groupby.atlassian.net"
