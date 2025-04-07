@@ -1,5 +1,6 @@
 import re
 import traceback
+from jira import JIRA, JIRAError
 
 from pr_agent.config_loader import get_settings
 from pr_agent.git_providers import GithubProvider
@@ -13,8 +14,8 @@ GITHUB_TICKET_PATTERN = re.compile(
 def find_jira_tickets(text):
     # Regular expression patterns for JIRA tickets
     patterns = [
-        r'\b[A-Z]{2,10}-\d{1,7}\b',  # Standard JIRA ticket format (e.g., PROJ-123)
-        r'(?:https?://[^\s/]+/browse/)?([A-Z]{2,10}-\d{1,7})\b'  # JIRA URL or just the ticket
+        r'\b[A-Z0-9]{2,10}-\d{1,7}\b',  # JIRA ticket format (e.g., S4R-1234)
+        r'(?:https?://[^\s/]+/browse/)?([A-Z0-9]{2,10}-\d{1,7})\b'  # JIRA URL or just the ticket
     ]
 
     tickets = set()
@@ -65,21 +66,22 @@ def extract_ticket_links_from_pr_description(pr_description, repo_path, base_url
 
 async def extract_tickets(git_provider):
     MAX_TICKET_CHARACTERS = 10000
+    tickets_content = []
+
     try:
+        user_description = git_provider.get_user_description()
+
+        # Extract GitHub tickets (existing logic)
         if isinstance(git_provider, GithubProvider):
-            user_description = git_provider.get_user_description()
-            tickets = extract_ticket_links_from_pr_description(user_description, git_provider.repo, git_provider.base_url_html)
-            tickets_content = []
-
-            if tickets:
-
-                for ticket in tickets:
+            github_tickets = extract_ticket_links_from_pr_description(user_description, git_provider.repo, git_provider.base_url_html)
+            if github_tickets:
+                for ticket in github_tickets:
                     repo_name, original_issue_number = git_provider._parse_issue_url(ticket)
 
                     try:
                         issue_main = git_provider.repo_obj.get_issue(original_issue_number)
                     except Exception as e:
-                        get_logger().error(f"Error getting main issue: {e}",
+                        get_logger().error(f"Error getting GitHub main issue: {e}",
                                            artifact={"traceback": traceback.format_exc()})
                         continue
 
@@ -106,10 +108,9 @@ async def extract_tickets(git_provider):
                                     'body': sub_body
                                 })
                             except Exception as e:
-                                get_logger().warning(f"Failed to fetch sub-issue content for {sub_issue_url}: {e}")
-
+                                get_logger().warning(f"Failed to fetch GitHub sub-issue content for {sub_issue_url}: {e}")
                     except Exception as e:
-                        get_logger().warning(f"Failed to fetch sub-issues for {ticket}: {e}")
+                        get_logger().warning(f"Failed to fetch GitHub sub-issues for {ticket}: {e}")
 
                     # Extract labels
                     labels = []
@@ -117,52 +118,133 @@ async def extract_tickets(git_provider):
                         for label in issue_main.labels:
                             labels.append(label.name if hasattr(label, 'name') else label)
                     except Exception as e:
-                        get_logger().error(f"Error extracting labels error= {e}",
+                        get_logger().error(f"Error extracting GitHub labels error= {e}",
                                            artifact={"traceback": traceback.format_exc()})
 
                     tickets_content.append({
-                        'ticket_id': issue_main.number,
+                        'ticket_id': f"GH-{issue_main.number}", # Prefix GH for GitHub issues
                         'ticket_url': ticket,
                         'title': issue_main.title,
                         'body': issue_body_str,
                         'labels': ", ".join(labels),
-                        'sub_issues': sub_issues_content  # Store sub-issues content
+                        'sub_issues': sub_issues_content
                     })
 
-                return tickets_content
+        # Extract Jira tickets
+        jira_keys = find_jira_tickets(user_description)
+        if jira_keys and get_settings().get("jira.enable_jira_integration", True): # Check if Jira integration enabled
+            jira_url = get_settings().get("jira.jira_base_url")
+            jira_email = get_settings().get("jira.jira_api_email")
+            jira_token = get_settings().get("jira.jira_api_token")
+
+            if jira_url and jira_email and jira_token:
+                try:
+                    options = {'server': jira_url}
+                    jira_client = JIRA(options=options, basic_auth=(jira_email, jira_token))
+                    get_logger().info(f"Successfully connected to Jira: {jira_url}")
+
+                    for key in jira_keys:
+                        try:
+                            issue = jira_client.issue(key)
+                            body = getattr(issue.fields, 'description', '') or ""
+                            if len(body) > MAX_TICKET_CHARACTERS:
+                                body = body[:MAX_TICKET_CHARACTERS] + "..."
+
+                            labels = getattr(issue.fields, 'labels', []) or []
+
+                            # Extract subtasks (if applicable, adjust fields as needed)
+                            subtasks_content = []
+                            if hasattr(issue.fields, 'subtasks') and issue.fields.subtasks:
+                                for subtask in issue.fields.subtasks:
+                                    try:
+                                        subtask_issue = jira_client.issue(subtask.key)
+                                        subtask_body = getattr(subtask_issue.fields, 'description', '') or ""
+                                        if len(subtask_body) > MAX_TICKET_CHARACTERS:
+                                           subtask_body = subtask_body[:MAX_TICKET_CHARACTERS] + "..."
+
+                                        subtasks_content.append({
+                                            'ticket_url': f"{jira_url}/browse/{subtask.key}",
+                                            'title': getattr(subtask_issue.fields, 'summary', ''),
+                                            'body': subtask_body
+                                        })
+                                    except JIRAError as e_sub:
+                                        get_logger().warning(f"Failed to fetch Jira subtask {subtask.key} for {key}: {e_sub.text}")
+                                    except Exception as e_sub_other:
+                                         get_logger().warning(f"An unexpected error occurred fetching Jira subtask {subtask.key}: {e_sub_other}")
+
+
+                            tickets_content.append({
+                                'ticket_id': key,
+                                'ticket_url': f"{jira_url}/browse/{key}",
+                                'title': getattr(issue.fields, 'summary', ''),
+                                'body': body,
+                                'status': getattr(issue.fields.status, 'name', 'Unknown'),
+                                'labels': ", ".join(labels),
+                                'sub_issues': subtasks_content # Using 'sub_issues' key for consistency
+                            })
+                            get_logger().info(f"Successfully fetched Jira ticket: {key}")
+
+                        except JIRAError as e:
+                            get_logger().error(f"Error fetching Jira ticket {key}: {e.status_code} - {e.text}",
+                                                artifact={"traceback": traceback.format_exc()})
+                        except Exception as e:
+                             get_logger().error(f"An unexpected error occurred fetching Jira ticket {key}: {e}",
+                                                artifact={"traceback": traceback.format_exc()})
+
+                except JIRAError as e:
+                    get_logger().error(f"Failed to connect to Jira: {e.status_code} - {e.text}",
+                                       artifact={"traceback": traceback.format_exc()})
+                except Exception as e:
+                     get_logger().error(f"An unexpected error occurred connecting to Jira: {e}",
+                                        artifact={"traceback": traceback.format_exc()})
+            else:
+                get_logger().warning("Jira configuration (URL, email, token) is incomplete. Skipping Jira ticket fetch.")
+        elif jira_keys:
+             get_logger().info("Jira integration disabled ('jira.enable_jira_integration' is false). Skipping Jira ticket fetch.")
+
+
+        return tickets_content
 
     except Exception as e:
-        get_logger().error(f"Error extracting tickets error= {e}",
+        get_logger().error(f"Error extracting tickets (main block): {e}",
                            artifact={"traceback": traceback.format_exc()})
+        return [] # Return empty list on error
 
 
 async def extract_and_cache_pr_tickets(git_provider, vars):
     if not get_settings().get('pr_reviewer.require_ticket_analysis_review', False):
+        vars['related_tickets'] = [] # Ensure it's initialized if review is disabled
         return
 
-    related_tickets = get_settings().get('related_tickets', [])
+    related_tickets_cache_key = f"related_tickets_{git_provider.pr_url}"
+    cached_data = get_settings().get(related_tickets_cache_key)
 
-    if not related_tickets:
-        tickets_content = await extract_tickets(git_provider)
+    # Check if cache is valid (e.g., based on description hash or timestamp if needed)
+    # For now, we just check if it exists
+    if cached_data:
+         get_logger().info("Using cached tickets", artifact={"tickets": cached_data})
+         vars['related_tickets'] = cached_data
+         # Optionally update the global settings cache if needed, though maybe better to keep it request-specific
+         # get_settings().set(related_tickets_cache_key, cached_data)
+         return
 
-        if tickets_content:
-            # Store sub-issues along with main issues
-            for ticket in tickets_content:
-                if "sub_issues" in ticket and ticket["sub_issues"]:
-                    for sub_issue in ticket["sub_issues"]:
-                        related_tickets.append(sub_issue)  # Add sub-issues content
+    # If no valid cache, extract fresh data
+    tickets_content = await extract_tickets(git_provider)
 
-                related_tickets.append(ticket)
-
-            get_logger().info("Extracted tickets and sub-issues from PR description",
-                              artifact={"tickets": related_tickets})
-
-            vars['related_tickets'] = related_tickets
-            get_settings().set('related_tickets', related_tickets)
+    if tickets_content:
+        # The extract_tickets function now returns a flat list including main and sub-issues appropriately formatted
+        vars['related_tickets'] = tickets_content
+        get_settings().set(related_tickets_cache_key, tickets_content) # Cache the fetched data
+        get_logger().info("Extracted and cached tickets from PR description",
+                          artifact={"tickets": tickets_content})
     else:
-        get_logger().info("Using cached tickets", artifact={"tickets": related_tickets})
-        vars['related_tickets'] = related_tickets
+         vars['related_tickets'] = [] # Ensure it's an empty list if no tickets found
+         get_logger().info("No relevant tickets found or failed to extract.")
+         # Optionally cache the empty result too, to avoid re-fetching if description hasn't changed
+         get_settings().set(related_tickets_cache_key, [])
 
 
 def check_tickets_relevancy():
+    # This function might need refinement based on how relevancy is determined
+    # For now, it just returns True
     return True
