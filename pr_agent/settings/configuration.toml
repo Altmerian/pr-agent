@@ -6,15 +6,15 @@
 
 [config]
 # models
-model="o4-mini"
-fallback_models=["gpt-4.1"]
-#model_reasoning="o4-mini" # dedictated reasoning model for self-reflection
-#model_weak="gpt-4o" # optional, a weaker model to use for some easier tasks
+model="anthropic/claude-3-7-sonnet-20250219"
+#model="gemini/gemini-2.5-pro-preview-03-25"
+fallback_models=["o4-mini", "gpt-4.1"]
+#model_weak="gemini/gemini-2.5-flash-preview-04-17" # optional, a weaker model to use for some easier tasks
 # CLI
 git_provider="github"
 publish_output=true
-publish_output_progress=true
-verbosity_level=0 # 0,1,2
+publish_output_progress=false
+verbosity_level=2
 use_extra_bad_extensions=false
 # Log
 log_level="DEBUG"
@@ -64,7 +64,7 @@ enable_auto_approval=false # Set to true to enable auto-approval of PRs under ce
 auto_approve_for_low_review_effort=-1 # -1 to disable, [1-5] to set the threshold for auto-approval
 auto_approve_for_no_suggestions=false # If true, the PR will be auto-approved if there are no suggestions
 # extended thinking for Claude reasoning models
-enable_claude_extended_thinking = false # Set to true to enable extended thinking feature
+enable_claude_extended_thinking = true # Set to true to enable extended thinking feature
 extended_thinking_budget_tokens = 2048
 extended_thinking_max_output_tokens = 4096
 
@@ -360,3 +360,6 @@ pr_commands = [
     "/review",
     "/improve",
 ]
+
+[jira]
+enable_jira_integration = true
