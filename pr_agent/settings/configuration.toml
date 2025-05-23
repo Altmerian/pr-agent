@@ -6,10 +6,12 @@
 
 [config]
 # models
-model="anthropic/claude-3-7-sonnet-20250219"
-#model="gemini/gemini-2.5-pro-preview-03-25"
-fallback_models=["o4-mini", "gpt-4.1"]
-#model_weak="gemini/gemini-2.5-flash-preview-04-17" # optional, a weaker model to use for some easier tasks
+model="anthropic/claude-sonnet-4-20250514"
+#model="gemini/gemini-2.5-pro-preview-05-06"
+#model="o4-mini"
+model_reasoning="o4-mini"
+fallback_models=["o4-mini","gpt-4.1"]
+#model_weak="gemini/gemini-2.5-flash-preview-05-20" # optional, a weaker model to use for some easier tasks
 # CLI
 git_provider="github"
 publish_output=true
@@ -55,6 +57,7 @@ ignore_pr_target_branches = [] # a list of regular expressions of target branche
 ignore_pr_source_branches = [] # a list of regular expressions of source branches to ignore from PR agent when an PR is created
 ignore_pr_labels = [] # labels to ignore from PR agent when an PR is created
 ignore_pr_authors = [] # authors to ignore from PR agent when an PR is created
+ignore_repositories = [] # a list of regular expressions of repository full names (e.g. "org/repo") to ignore from PR agent processing
 #
 is_auto_command = false # will be auto-set to true if the command is triggered by an automation
 enable_ai_metadata = false # will enable adding ai metadata
@@ -80,6 +83,7 @@ require_ticket_analysis_review=true
 # general options
 persistent_comment=true
 extra_instructions = ""
+num_max_findings = 3
 final_update_message = true
 # review labels
 enable_review_labels_security=true
@@ -313,6 +317,7 @@ pr_commands = [
 [litellm]
 # use_client = false
 # drop_params = false
+drop_params = true
 enable_callbacks = false
 success_callback = []
 failure_callback = []
