@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import difflib
 import hashlib
@@ -14,7 +15,7 @@ import traceback
 from datetime import datetime
 from enum import Enum
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any, List, Tuple
+from typing import Any, List, Tuple, TypedDict
 
 import html2text
 import requests
@@ -37,20 +38,30 @@ def get_model(model_type: str = "model_weak") -> str:
         return get_settings().config.model_reasoning
     return get_settings().config.model
 
+
 class Range(BaseModel):
     line_start: int  # should be 0-indexed
     line_end: int
     column_start: int = -1
     column_end: int = -1
 
+
 class ModelType(str, Enum):
     REGULAR = "regular"
     WEAK = "weak"
     REASONING = "reasoning"
 
+
+class TodoItem(TypedDict):
+    relevant_file: str
+    line_range: Tuple[int, int]
+    content: str
+
+
 class PRReviewHeader(str, Enum):
     REGULAR = "## PR Reviewer Guide"
     INCREMENTAL = "## Incremental PR Reviewer Guide"
+
 
 class ReasoningEffort(str, Enum):
     HIGH = "high"
@@ -109,6 +120,7 @@ def unique_strings(input_list: List[str]) -> List[str]:
             seen.add(item)
     return unique_list
 
+
 def convert_to_markdown_v2(output_data: dict,
                            gfm_supported: bool = True,
                            incremental_review=None,
@@ -131,6 +143,7 @@ def convert_to_markdown_v2(output_data: dict,
         "Focused PR": "✨",
         "Relevant ticket": "🎫",
         "Security concerns": "🔒",
+        "Todo sections": "📝",
         "Insights from user's answers": "📝",
         "Code feedback": "🤖",
         "Estimated effort to review [1-5]": "⏱️",
@@ -151,6 +164,7 @@ def convert_to_markdown_v2(output_data: dict,
     if gfm_supported:
         markdown_text += "<table>\n"
 
+    todo_summary = output_data['review'].pop('todo_summary', '')
     for key, value in output_data['review'].items():
         if value is None or value == '' or value == {} or value == []:
             if key.lower() not in ['can_be_split', 'key_issues_to_review']:
@@ -209,6 +223,23 @@ def convert_to_markdown_v2(output_data: dict,
                     markdown_text += f"### {emoji} Security concerns\n\n"
                     value = emphasize_header(value.strip(), only_markdown=True)
                     markdown_text += f"{value}\n\n"
+        elif 'todo sections' in key_nice.lower():
+            if gfm_supported:
+                markdown_text += "<tr><td>"
+                if is_value_no(value):
+                    markdown_text += f"✅&nbsp;<strong>No TODO sections</strong>"
+                else:
+                    markdown_todo_items = format_todo_items(value, git_provider, gfm_supported)
+                    markdown_text += f"{emoji}&nbsp;<strong>TODO sections</strong>\n<br><br>\n"
+                    markdown_text += markdown_todo_items
+                markdown_text += "</td></tr>\n"
+            else:
+                if is_value_no(value):
+                    markdown_text += f"### ✅ No TODO sections\n\n"
+                else:
+                    markdown_todo_items = format_todo_items(value, git_provider, gfm_supported)
+                    markdown_text += f"### {emoji} TODO sections\n\n"
+                    markdown_text += markdown_todo_items
         elif 'can be split' in key_nice.lower():
             if gfm_supported:
                 markdown_text += f"<tr><td>"
@@ -1289,7 +1320,7 @@ def process_description(description_full: str) -> Tuple[str, List]:
                         pattern_back = r'<details>\s*<summary><strong>(.*?)</strong><dd><code>(.*?)</code>.*?</summary>\s*<hr>\s*(.*?)\n\n\s*(.*?)</details>'
                         res = re.search(pattern_back, file_data, re.DOTALL)
                     if not res or res.lastindex != 4:
-                        pattern_back = r'<details>\s*<summary><strong>(.*?)</strong>\s*<dd><code>(.*?)</code>.*?</summary>\s*<hr>\s*(.*?)\s*-\s*(.*?)\s*</details>' # looking for hypen ('- ')
+                        pattern_back = r'<details>\s*<summary><strong>(.*?)</strong>\s*<dd><code>(.*?)</code>.*?</summary>\s*<hr>\s*(.*?)\s*-\s*(.*?)\s*</details>' # looking for hyphen ('- ')
                         res = re.search(pattern_back, file_data, re.DOTALL)
                     if res and res.lastindex == 4:
                         short_filename = res.group(1).strip()
@@ -1367,3 +1398,47 @@ def set_file_languages(diff_files) -> List[FilePatchInfo]:
         get_logger().exception(f"Failed to set file languages: {e}")
 
     return diff_files
+
+def format_todo_item(todo_item: TodoItem, git_provider, gfm_supported) -> str:
+    relevant_file = todo_item.get('relevant_file', '').strip()
+    line_number = todo_item.get('line_number', '')
+    content = todo_item.get('content', '')
+    reference_link = git_provider.get_line_link(relevant_file, line_number, line_number)
+    file_ref = f"{relevant_file} [{line_number}]"
+    if reference_link:
+        if gfm_supported:
+            file_ref = f"<a href='{reference_link}'>{file_ref}</a>"
+        else:
+            file_ref = f"[{file_ref}]({reference_link})"
+
+    if content:
+        return f"{file_ref}: {content.strip()}"
+    else:
+        # if content is empty, return only the file reference
+        return file_ref
+
+
+def format_todo_items(value: list[TodoItem] | TodoItem, git_provider, gfm_supported) -> str:
+    markdown_text = ""
+    MAX_ITEMS = 5 # limit the number of items to display
+    if gfm_supported:
+        if isinstance(value, list):
+            markdown_text += "<ul>\n"
+            if len(value) > MAX_ITEMS:
+                get_logger().debug(f"Truncating todo items to {MAX_ITEMS} items")
+                value = value[:MAX_ITEMS]
+            for todo_item in value:
+                markdown_text += f"<li>{format_todo_item(todo_item, git_provider, gfm_supported)}</li>\n"
+            markdown_text += "</ul>\n"
+        else:
+            markdown_text += f"<p>{format_todo_item(value, git_provider, gfm_supported)}</p>\n"
+    else:
+        if isinstance(value, list):
+            if len(value) > MAX_ITEMS:
+                get_logger().debug(f"Truncating todo items to {MAX_ITEMS} items")
+                value = value[:MAX_ITEMS]
+            for todo_item in value:
+                markdown_text += f"- {format_todo_item(todo_item, git_provider, gfm_supported)}\n"
+        else:
+            markdown_text += f"- {format_todo_item(value, git_provider, gfm_supported)}\n"
+    return markdown_text

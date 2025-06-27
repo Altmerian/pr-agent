@@ -5,6 +5,7 @@ from jira import JIRA, JIRAError
 
 from pr_agent.config_loader import get_settings
 from pr_agent.git_providers import GithubProvider
+from pr_agent.git_providers import AzureDevopsProvider
 from pr_agent.log import get_logger
 
 # Compile the regex pattern once, outside the function
@@ -227,6 +228,32 @@ async def extract_tickets(git_provider):
             )
 
         return tickets_content
+
+        elif isinstance(git_provider, AzureDevopsProvider):
+            tickets_info = git_provider.get_linked_work_items()
+            tickets_content = []
+            for ticket in tickets_info:
+                try:
+                    ticket_body_str = ticket.get("body", "")
+                    if len(ticket_body_str) > MAX_TICKET_CHARACTERS:
+                        ticket_body_str = ticket_body_str[:MAX_TICKET_CHARACTERS] + "..."
+
+                    tickets_content.append(
+                        {
+                            "ticket_id": ticket.get("id"),
+                            "ticket_url": ticket.get("url"),
+                            "title": ticket.get("title"),
+                            "body": ticket_body_str,
+                            "requirements": ticket.get("acceptance_criteria", ""),
+                            "labels": ", ".join(ticket.get("labels", [])),
+                        }
+                    )
+                except Exception as e:
+                    get_logger().error(
+                        f"Error processing Azure DevOps ticket: {e}",
+                        artifact={"traceback": traceback.format_exc()},
+                    )
+            return tickets_content
 
     except Exception as e:
         get_logger().error(
