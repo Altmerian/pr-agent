@@ -1,3 +1,4 @@
+import asyncio
 import re
 import traceback
 
@@ -214,8 +215,8 @@ def _extract_single_jira_ticket(jira_client, key, jira_url):
     return None
 
 
-def _extract_jira_tickets(user_description):
-    """Extract Jira tickets and their details."""
+def _extract_jira_tickets_sync(user_description):
+    """Synchronous helper function to extract Jira tickets and their details."""
     tickets_content = []
 
     jira_keys = find_jira_tickets(user_description)
@@ -243,7 +244,8 @@ def _extract_jira_tickets(user_description):
     # Connect to Jira and extract tickets
     try:
         options = {"server": jira_url}
-        jira_client = JIRA(options=options, basic_auth=(jira_email, jira_token))
+        # Add timeout to prevent hanging on connection issues
+        jira_client = JIRA(options=options, basic_auth=(jira_email, jira_token), timeout=15)
         get_logger().info(f"Successfully connected to Jira: {jira_url}")
 
         for key in jira_keys:
@@ -257,6 +259,12 @@ def _extract_jira_tickets(user_description):
             f"Failed to connect to Jira: HTTP {e.status_code}",
             artifact={"traceback": traceback.format_exc()},
         )
+    except (ConnectionError, TimeoutError, OSError) as e:
+        # Handle network-related errors specifically
+        get_logger().error(
+            f"Network error connecting to Jira: {type(e).__name__}: {e}",
+            artifact={"traceback": traceback.format_exc()},
+        )
     except Exception as e:
         get_logger().error(
             f"An unexpected error occurred connecting to Jira: {e}",
@@ -264,6 +272,20 @@ def _extract_jira_tickets(user_description):
         )
 
     return tickets_content
+
+
+async def _extract_jira_tickets(user_description):
+    """Async wrapper to extract Jira tickets using thread pool to prevent event loop blocking."""
+    try:
+        # Offload the synchronous Jira operations to a thread pool
+        tickets_content = await asyncio.to_thread(_extract_jira_tickets_sync, user_description)
+        return tickets_content
+    except Exception as e:
+        get_logger().error(
+            f"Error in async Jira ticket extraction: {e}",
+            artifact={"traceback": traceback.format_exc()},
+        )
+        return []
 
 
 def _extract_azure_devops_tickets(git_provider):
@@ -319,7 +341,8 @@ async def extract_tickets(git_provider):
             tickets_content.extend(_extract_azure_devops_tickets(git_provider))
 
         # Always try to extract Jira tickets from description (regardless of git provider)
-        tickets_content.extend(_extract_jira_tickets(user_description))
+        jira_tickets = await _extract_jira_tickets(user_description)
+        tickets_content.extend(jira_tickets)
 
     except Exception as e:
         get_logger().error(

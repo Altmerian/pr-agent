@@ -9,7 +9,7 @@
 model="anthropic/claude-sonnet-4-20250514"
 #model="gemini/gemini-2.5-pro"
 #model="o4-mini"
-model_reasoning="o4-mini"
+#model_reasoning="o4-mini"
 fallback_models=["o4-mini","gpt-4.1"]
 #model_weak="gemini/gemini-2.5-flash" # optional, a weaker model to use for some easier tasks
 # CLI
@@ -32,7 +32,7 @@ response_language="en-US" # Language locales code for PR responses in ISO 3166 a
 # token limits
 max_description_tokens = 500
 max_commits_tokens = 500
-max_model_tokens = 32000 # Limits the maximum number of tokens that can be used by any model, regardless of the model's default capabilities.
+max_model_tokens = 128000 # Limits the maximum number of tokens that can be used by any model, regardless of the model's default capabilities.
 custom_model_max_tokens=-1 # for models not in the default list
 model_token_count_estimate_factor=0.3 # factor to increase the token count estimate, in order to reduce likelihood of model failure due to too many tokens - applicable only when requesting an accurate estimate.
 # patch extension logic
@@ -70,8 +70,8 @@ auto_approve_for_no_suggestions=false # If true, the PR will be auto-approved if
 ensure_ticket_compliance=false # Set to true to disable auto-approval of PRs if the ticket is not compliant
 # extended thinking for Claude reasoning models
 enable_claude_extended_thinking = true # Set to true to enable extended thinking feature
-extended_thinking_budget_tokens = 2048
-extended_thinking_max_output_tokens = 4096
+extended_thinking_budget_tokens = 32000
+extended_thinking_max_output_tokens = 8192
 
 
 [pr_reviewer] # /review #
