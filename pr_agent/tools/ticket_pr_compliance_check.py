@@ -179,13 +179,69 @@ def _extract_jira_subtasks(jira_client, issue, jira_url):
     return subtasks_content
 
 
+def _extract_requirements_from_jira_description(description):
+    """
+    Extract requirements, acceptance criteria, and DoD from JIRA ticket description.
+    
+    Looks for common patterns like:
+    - Acceptance Criteria:
+    - Requirements:
+    - DoD: (Definition of Done)
+    - AC:
+    - User stories (As a ... I want ... so that ...)
+    """
+    if not description:
+        return ""
+    
+    requirements_sections = []
+    
+    # Common requirement section headers (case-insensitive)
+    requirement_patterns = [
+        r'(?i)(?:^|\n)\s*(?:acceptance\s+criteria|ac)\s*:?\s*(.*?)(?=\n\s*(?:[A-Z][^:]*:|$))',
+        r'(?i)(?:^|\n)\s*requirements?\s*:?\s*(.*?)(?=\n\s*(?:[A-Z][^:]*:|$))',
+        r'(?i)(?:^|\n)\s*(?:definition\s+of\s+done|dod)\s*:?\s*(.*?)(?=\n\s*(?:[A-Z][^:]*:|$))',
+        r'(?i)(?:^|\n)\s*(?:user\s+stor(?:y|ies))\s*:?\s*(.*?)(?=\n\s*(?:[A-Z][^:]*:|$))',
+        r'(?i)(?:^|\n)\s*(?:acceptance\s+test(?:s|ing)?)\s*:?\s*(.*?)(?=\n\s*(?:[A-Z][^:]*:|$))',
+    ]
+    
+    for pattern in requirement_patterns:
+        matches = re.findall(pattern, description, re.DOTALL)
+        for match in matches:
+            if match.strip():
+                requirements_sections.append(match.strip())
+    
+    # Also look for user story patterns: "As a ... I want ... so that ..."
+    user_story_pattern = r'(?i)as\s+(?:a|an)\s+(.+?)\s+i\s+want\s+(.+?)(?:\s+so\s+that\s+(.+?))?(?=\n|$)'
+    user_stories = re.findall(user_story_pattern, description, re.DOTALL)
+    for story in user_stories:
+        role, want, reason = story
+        story_text = f"As a {role.strip()}, I want {want.strip()}"
+        if reason.strip():
+            story_text += f" so that {reason.strip()}"
+        requirements_sections.append(story_text)
+    
+    # Clean up and format requirements
+    formatted_requirements = []
+    for section in requirements_sections:
+        # Clean up extra whitespace and format
+        clean_section = re.sub(r'\s+', ' ', section.strip())
+        if clean_section and len(clean_section) > 10:  # Filter out very short entries
+            formatted_requirements.append(clean_section)
+    
+    return '\n'.join(formatted_requirements) if formatted_requirements else ""
+
+
 def _extract_single_jira_ticket(jira_client, key, jira_url):
     """Extract a single Jira ticket and its details."""
     try:
         issue = jira_client.issue(key)
-        body = _truncate_text(getattr(issue.fields, "description", ""))
+        full_description = getattr(issue.fields, "description", "")
+        body = _truncate_text(full_description)
         labels = getattr(issue.fields, "labels", []) or []
         subtasks_content = _extract_jira_subtasks(jira_client, issue, jira_url)
+        
+        # Extract requirements from the full description before truncation
+        requirements = _extract_requirements_from_jira_description(full_description)
 
         ticket_data = {
             "ticket_id": key,
@@ -195,9 +251,15 @@ def _extract_single_jira_ticket(jira_client, key, jira_url):
             "status": getattr(issue.fields.status, "name", "Unknown"),
             "labels": ", ".join(labels),
             "sub_issues": subtasks_content,
+            "requirements": requirements,  # Add extracted requirements
         }
 
-        get_logger().info(f"Successfully fetched Jira ticket: {key}")
+        if requirements:
+            get_logger().info(f"Successfully fetched Jira ticket: {key} with extracted requirements")
+            get_logger().debug(f"Extracted requirements for {key}: {requirements[:200]}...")
+        else:
+            get_logger().info(f"Successfully fetched Jira ticket: {key} (no structured requirements found)")
+        
         return ticket_data
 
     except JIRAError as e:
