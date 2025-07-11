@@ -40,6 +40,7 @@ PR-Agent aims to help efficiently review and handle pull requests, by providing 
 - [Data Privacy](#data-privacy)
 - [Contributing](#contributing)
 - [Links](#links)
+- [Run PR-Agent locally](#run-pr-agent-locally)
 
 ## Getting Started
 
@@ -264,3 +265,13 @@ To contribute to the project, get started by reading our [Contributing Guide](ht
 - Blog: https://www.qodo.ai/blog/
 - Troubleshooting: https://www.qodo.ai/blog/technical-faq-and-troubleshooting/
 - Support: support@qodo.ai
+
+
+## run pr-agent locally
+
+```
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+python -m pr_agent.cli --pr_url=https://github.com/Codium-ai/pr-agent/pull/1234 review
+```

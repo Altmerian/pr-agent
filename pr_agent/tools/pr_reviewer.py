@@ -213,8 +213,17 @@ class PRReviewer:
         variables["diff"] = self.patches_diff  # update diff
 
         environment = Environment(undefined=StrictUndefined)
-        system_prompt = environment.from_string(get_settings().pr_review_prompt.system).render(variables)
-        user_prompt = environment.from_string(get_settings().pr_review_prompt.user).render(variables)
+        
+        try:
+            system_prompt = environment.from_string(get_settings().pr_review_prompt.system).render(variables)
+            user_prompt = environment.from_string(get_settings().pr_review_prompt.user).render(variables)
+        except Exception as e:
+            get_logger().error(f"Template rendering failed - likely due to corrupted ticket content: {e}")
+            # Fall back to empty tickets if template rendering fails
+            variables["related_tickets"] = []
+            get_logger().info("Falling back to empty ticket data to continue review")
+            system_prompt = environment.from_string(get_settings().pr_review_prompt.system).render(variables)
+            user_prompt = environment.from_string(get_settings().pr_review_prompt.user).render(variables)
 
         response, finish_reason = await self.ai_handler.chat_completion(
             model=model,
